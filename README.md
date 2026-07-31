@@ -4,7 +4,7 @@
 
 A production-grade infrastructure for registering, versioning, and serving machine learning models at scale. Designed with microservices principles, this platform provides high-throughput real-time inference, model lifecycle management, and enterprise-level observability.
 
-## 🏗 Architecture & Tech Stack
+##  Architecture & Tech Stack
 
 - **API Layer:** FastAPI, Pydantic, Python 3.10+
 - **Database (Model Registry):** PostgreSQL
@@ -14,7 +14,7 @@ A production-grade infrastructure for registering, versioning, and serving machi
 - **Observability:** Prometheus, Grafana
 - **Testing:** pytest
 
-## 🚀 Quick Start (Local Development)
+##  Quick Start (Local Development)
 
 The local environment is fully containerized. You do not need to install anything other than Docker.
 
@@ -57,7 +57,7 @@ curl http://localhost:8000/health
 
 *Expected Response:* `{"status": "ok"}`
 
-## 📖 Core API Endpoints
+##  Core API Endpoints
 
 Once the application is running, the interactive API documentation is available at `http://localhost:8000/docs`.
 
@@ -83,7 +83,7 @@ Once the application is running, the interactive API documentation is available 
 
 
 
-## 📂 Project Structure
+##  Project Structure
 
 ```text
 ml-serving-platform/
@@ -101,7 +101,7 @@ ml-serving-platform/
 
 ```
 
-## 🛠 Running Tests
+##  Running Tests
 
 Tests are executed inside an isolated container to ensure environment consistency.
 
