@@ -1,4 +1,3 @@
-این یک README کوتاه، عملیاتی و کاملاً استاندارد برای محیط Production است که می‌توانی مستقیماً در فایل `README.md` پروژه قرار دهی. (زبان README انگلیسی نوشته شده تا برای ریپازیتوری گیت‌هاب و ارائه به Recruiterها/Team Leadهای بین‌المللی مناسب باشد).
 
 ```markdown
 # ML Model Serving Platform (MSP)
