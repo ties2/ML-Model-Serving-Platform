@@ -33,7 +33,7 @@ source .venv/bin/activate
 ```
 3. **Set up environment variables:**
 ```bash
-cp .env.example .env
+cp env.example. .env
 ```
 
 

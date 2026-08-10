@@ -4,7 +4,9 @@
 fastapi>=0.100.0     # Main framework for building APIs
 uvicorn>=0.23.0      # Server for running the application
 pydantic>=2.0.0      # Data validation
-
+pydantic-settings>=2.0.0
+pytest>=7.0.0
+httpx>=0.25.0
 # ==========================================
 # 2. Machine Learning & Data Processing
 # ==========================================
