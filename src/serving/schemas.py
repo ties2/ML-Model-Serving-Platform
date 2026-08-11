@@ -9,7 +9,7 @@ class ModelVersionCreate(BaseModel):
     version: str
     framework: str
     model_format: str
-    artifact_path: str
+    artifact_uri: str
     status: str = "staging"
 
 class ModelVersionResponse(ModelVersionCreate):

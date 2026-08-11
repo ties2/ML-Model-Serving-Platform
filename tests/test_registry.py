@@ -48,7 +48,7 @@ def test_create_model_version():
             "version": "1.0.0",
             "framework": "scikit-learn",
             "model_format": "joblib",
-            "artifact_path": "models/test/1.0.0/model.joblib",
+            "artifact_uri": "models/test/1.0.0/model.joblib",
             "status": "staging"
         }
     )
@@ -65,7 +65,7 @@ def test_create_duplicate_model_version():
             "version": "1.0.0",
             "framework": "scikit-learn",
             "model_format": "joblib",
-            "artifact_path": "models/test/1.0.0/model.joblib",
+            "artifact_uri": "models/test/1.0.0/model.joblib",
             "status": "staging"
         }
     )

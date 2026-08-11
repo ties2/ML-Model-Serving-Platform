@@ -97,15 +97,21 @@ Once the application is running, the interactive API documentation is available 
 ```
 ## troubleshooting
 ```bash
+#restart docker
 docker compose down
+docker compose up -d 
 
+#build api
 docker compose build --no-cache api
 
 #craate build again
 docker compose build
 docker compose up -d
 ```
-
+# Testing
+```bash
+docker compose run --rm api pytest -v
+```
 
 
 ##  Project Structure

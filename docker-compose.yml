@@ -36,6 +36,9 @@ services:
         condition: service_healthy
     volumes:
       - ./src:/app/src
+      - ./tests:/app/tests
+      - model_artifacts:/app/model_artifacts
 
 volumes:
   postgres_data:
+  model_artifacts:

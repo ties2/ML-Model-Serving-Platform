@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     postgres_db: str
     postgres_host: str
     postgres_port: int
+    ARTIFACT_STORAGE_BACKEND: str = 'local'
+    LOCAL_ARTIFACT_DIR: str = '/app/model_artifacts/'
 
     #
     # class Config:

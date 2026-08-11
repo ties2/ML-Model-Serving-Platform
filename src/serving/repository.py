@@ -45,7 +45,7 @@ class ModelVersionRepository:
             version=version_data.version,
             framework=version_data.framework,
             model_format=version_data.model_format,
-            artifact_path=version_data.artifact_path,
+            artifact_uri=version_data.artifact_uri,
             status=version_data.status
         )
         db.add(db_version)

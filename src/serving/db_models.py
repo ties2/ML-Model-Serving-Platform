@@ -21,7 +21,7 @@ class DBModelVersion(Base):
     version = Column(String, nullable=False)
     framework = Column(String, nullable=False)
     model_format = Column(String, nullable=False)
-    artifact_path = Column(String, nullable=False)
+    artifact_uri = Column(String, nullable=False)
     status = Column(String, nullable=False, default="staging")
     created_at = Column(DateTime, default=datetime.utcnow)
 
