@@ -12,6 +12,24 @@ A production-grade infrastructure for registering, versioning, and serving machi
 - **Linting & Formatting:** Ruff (managed via pre-commit hooks)[cite: 1]
 - **Infrastructure & CI/CD:** Docker, GitHub Actions, Make[cite: 1]
 
+
+## Current Status & Features
+
+**CURRENTLY IMPLEMENTED:**
+* ✅ **FastAPI Base Setup:** Core application structure.
+* ✅ **Health Check:** `GET /health` endpoint working.
+* ✅ **Dockerization:** Containerized via Docker & Docker Compose.
+* ✅ **Database:** PostgreSQL container configured and connected.
+* ✅ **Testing:** Initial pytest setup for health checks.
+
+**PLANNED FOR FUTURE RELEASES (MLOps Scope):**
+* 🚧 Model Registry (PostgreSQL)
+* 🚧 Model Versioning & Experiment Tracking (MLflow, DVC)
+* 🚧 Real-time Inference (`POST /predict`)
+* 🚧 Model Monitoring & Drift Detection
+* 🚧 CI/CD Pipelines (GitHub Actions)
+
+
 ## Quick Start (Local Development)
 
 1. **Clone the repository:**
@@ -76,6 +94,16 @@ Once the application is running, the interactive API documentation is available 
   }
 }
 
+```
+## troubleshooting
+```bash
+docker compose down
+
+docker compose build --no-cache api
+
+#craate build again
+docker compose build
+docker compose up -d
 ```
 
 
