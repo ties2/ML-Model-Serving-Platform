@@ -1,7 +1,7 @@
 #validation data
 
-from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from pydantic import BaseModel, ConfigDict, validator, field_validator
+from typing import Optional, List, Any
 from datetime import datetime
 
 # Schemas for Model Version
@@ -30,3 +30,16 @@ class ModelResponse(ModelCreate):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+class PredictionRequest(BaseModel):
+    features: List[float]
+
+    @field_validator('features')
+    @classmethod
+    def check_empty_feature(cls, v):
+        if not v:
+            raise ValueError("Feature cannot be empty")
+        return v
+class PredictionResponse(BaseModel):
+    model_name: str
+    version: str
+    prediction: Any

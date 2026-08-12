@@ -8,6 +8,12 @@ from src.serving.loader import SklearnJoblibLoader, UnsupportedModelFormat
 from src.serving.cache import model_cache
 from src.serving.dependency import get_artifact_storage
 
+class InvalidFeatures(Exception):
+    pass
+class PredictionError(Exception):
+    pass
+
+
 class ArchivedModelError(Exception):
     pass
 
@@ -112,3 +118,46 @@ class ModelVersionService:
             "version": version,
             "loaded": is_loaded
         }
+
+
+class PredictionService:
+    @staticmethod
+    def predict(db: Session, model_name: str, version: str, features: list[float]) -> dict:
+        # 1. Is the model in the Cache? If not, load it (Auto-loading)
+        if not model_cache.contains(model_name, version):
+            # The load_model_version method performs all checks (model existence, version, archived status, and finding the file)
+            ModelVersionService.load_model_version(db, model_name, version)
+
+        # 2. Retrieve the model from the Cache
+        model = model_cache.get(model_name, version)
+        if not model:
+            raise PredictionError("Model is not available in memory after load attempt.")
+
+        # 3. Feature Count Validation
+        # Many Scikit-Learn models have the n_features_in_ attribute
+        if hasattr(model, "n_features_in_"):
+            expected_features = model.n_features_in_
+            if len(features) != expected_features:
+                raise InvalidFeatures(
+                    f"Invalid number of features. Expected {expected_features}, got {len(features)}."
+                )
+
+        # 4. Execute prediction
+        try:
+            # Scikit-Learn expects a 2D array (a list of lists)
+            prediction_result = model.predict([features])
+
+            # Extract the first result (since we only sent one record)
+            prediction_value = prediction_result[0]
+
+            # Convert NumPy values to standard Python types (for JSON serialization)
+            if hasattr(prediction_value, "item"):
+                prediction_value = prediction_value.item()
+
+            return {
+                "model_name": model_name,
+                "version": version,
+                "prediction": prediction_value
+            }
+        except Exception as e:
+            raise PredictionError(f"Error during model prediction: {str(e)}")

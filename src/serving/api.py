@@ -3,13 +3,15 @@ from sqlalchemy.orm import Session
 from typing import List
 from src.serving import schemas
 from src.serving.database import get_db
-from src.serving.service import ModelService, ModelVersionService, ArchivedModelError
+from src.serving.service import ModelService, ModelVersionService, ArchivedModelError, InvalidFeatures, PredictionError, PredictionService
 from src.serving.storage import ArtifactNotFoundError
 from src.serving.loader import (
     UnsupportedModelFormat,
     InvalidModelArtifact,
     ModelLoadError
 )
+
+from src.serving.schemas import PredictionRequest, PredictionResponse
 
 router = APIRouter(prefix="/models", tags=["Model Registry"])
 
@@ -79,3 +81,34 @@ def get_model_status(model_name: str, version: str):
     # This method doesn't need the database because it reads directly from RAM (Cache)
     result = ModelVersionService.get_model_status(model_name, version)
     return result
+
+@router.post("/{model_name}/versions/{version}/predict", response_model=PredictionResponse)
+def predict_model(
+        model_name: str,
+        version: str,
+        request: PredictionRequest,
+        db: Session = Depends(get_db)
+):
+    """
+    Main endpoint to run Inference on a specific model.
+    If the model is not in memory, it will be loaded automatically.
+    """
+    try:
+        result = PredictionService.predict(db, model_name, version, request.features)
+        return result
+
+    except ArchivedModelError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+    except ArtifactNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    except InvalidFeatures as e:
+        # 422 Unprocessable Entity status code for when the JSON structure is correct but the data logic (like the number of features) is incorrect
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+    except (UnsupportedModelFormat, InvalidModelArtifact) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    except (PredictionError, ModelLoadError) as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
