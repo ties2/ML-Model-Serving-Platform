@@ -3,6 +3,13 @@ from fastapi import HTTPException
 from starlette import status
 from src.serving import schemas
 from src.serving.repository import ModelRepository, ModelVersionRepository
+from src.serving.storage import ArtifactNotFoundError
+from src.serving.loader import SklearnJoblibLoader, UnsupportedModelFormat
+from src.serving.cache import model_cache
+from src.serving.dependency import get_artifact_storage
+
+class ArchivedModelError(Exception):
+    pass
 
 class ModelService:
     @staticmethod
@@ -14,6 +21,7 @@ class ModelService:
                 detail=f"Model with name '{model_data.name}' already exists."
             )
         return ModelRepository.create_model(db, model_data)
+
     @staticmethod
     def get_all_models(db: Session):
         return ModelRepository.get_all_models(db)
@@ -45,5 +53,62 @@ class ModelVersionService:
     @staticmethod
     def get_versions(db: Session, model_name: str):
         model = ModelService.get_model_by_name(db, model_name)
-
         return ModelVersionRepository.get_versions_by_model(db, model.id)
+
+    @staticmethod
+    def load_model_version(db: Session, model_name: str, version: str) -> dict:
+        """
+        Complete management of loading a model from storage to memory (MSP-004)
+        """
+        # 1. Check if the model exists
+        model = ModelService.get_model_by_name(db, model_name)
+
+        # 2. Check if the version exists
+        model_version = ModelVersionRepository.get_version_by_model_and_name(db, model.id, version)
+        if not model_version:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Version '{version}' not found for model '{model_name}'."
+            )
+
+        # 3. Apply lifecycle management rules
+        if model_version.status == "archived":
+            raise ArchivedModelError(f"Cannot load archived model version: {model_name}:{version}")
+
+        # 4. Check cache (has it already been loaded?)
+        if model_cache.contains(model_name, version):
+            return {"model_name": model_name, "version": version, "status": "already_loaded"}
+
+        # 5. Validate supported format
+        if model_version.framework != "scikit-learn" or model_version.model_format != "joblib":
+            raise UnsupportedModelFormat(
+                f"Unsupported format: {model_version.framework}/{model_version.model_format}"
+            )
+
+        # 6. Retrieve model file bytes from the Storage Layer
+        storage = get_artifact_storage()
+        try:
+            artifact_bytes = storage.get(model_version.artifact_uri)
+        except ArtifactNotFoundError:
+            raise ArtifactNotFoundError(f"Artifact missing for URI: {model_version.artifact_uri}")
+
+        # 7. Load the bytes as a model into Memory
+        loader = SklearnJoblibLoader()
+        loaded_model = loader.load(artifact_bytes)
+
+        # 8. Save in Cache for future requests
+        model_cache.set(model_name, version, loaded_model)
+
+        return {"model_name": model_name, "version": version, "status": "loaded"}
+
+    @staticmethod
+    def get_model_status(model_name: str, version: str) -> dict:
+        """
+        Check the load status of a model in the Cache
+        """
+        is_loaded = model_cache.contains(model_name, version)
+        return {
+            "model_name": model_name,
+            "version": version,
+            "loaded": is_loaded
+        }

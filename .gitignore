@@ -46,3 +46,7 @@ mlflow.db
 .idea/
 .DS_Store
 __MACOSX/
+# ============
+#other folders
+# ===========
+bk
