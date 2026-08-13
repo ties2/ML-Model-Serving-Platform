@@ -102,7 +102,7 @@ def test_wrong_feature_count(setup_environment):
         json={"features": [1.0, 2.0, 3.0]}
     )
     assert response.status_code == 422
-    assert "Invalid number of features" in response.text
+    assert "Expected" in response.text and "features" in response.text
 
 # ==========================================
 # 3. Registry & Status Tests

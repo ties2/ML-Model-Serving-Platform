@@ -12,6 +12,8 @@ from src.serving.loader import (
 )
 
 from src.serving.schemas import PredictionRequest, PredictionResponse
+from src.serving.observability import Observability
+
 
 router = APIRouter(prefix="/models", tags=["Model Registry"])
 
@@ -82,33 +84,34 @@ def get_model_status(model_name: str, version: str):
     result = ModelVersionService.get_model_status(model_name, version)
     return result
 
+
 @router.post("/{model_name}/versions/{version}/predict", response_model=PredictionResponse)
-def predict_model(
-        model_name: str,
-        version: str,
-        request: PredictionRequest,
-        db: Session = Depends(get_db)
-):
-    """
-    Main endpoint to run Inference on a specific model.
-    If the model is not in memory, it will be loaded automatically.
-    """
+def predict_model(model_name: str, version: str, request: PredictionRequest, db: Session = Depends(get_db)):
     try:
-        result = PredictionService.predict(db, model_name, version, request.features)
-        return result
+        return PredictionService.predict(db, model_name, version, request.features)
 
     except ArchivedModelError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        Observability.record_prediction_error(model_name, version, "archived_model")
+        raise HTTPException(status_code=409, detail=str(e))
 
     except ArtifactNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        Observability.record_prediction_error(model_name, version, "artifact_not_found")
+        raise HTTPException(status_code=404, detail=str(e))
 
     except InvalidFeatures as e:
-        # 422 Unprocessable Entity status code for when the JSON structure is correct but the data logic (like the number of features) is incorrect
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+        Observability.record_prediction_error(model_name, version, "invalid_features")
+        raise HTTPException(status_code=422, detail=str(e))
 
     except (UnsupportedModelFormat, InvalidModelArtifact) as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        Observability.record_prediction_error(model_name, version, "invalid_model_artifact")
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except HTTPException as e:
+        if e.status_code == 404:
+            err_type = "model_not_found" if "Model" in str(e.detail) else "version_not_found"
+            Observability.record_prediction_error(model_name, version, err_type)
+        raise e
 
     except (PredictionError, ModelLoadError) as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        Observability.record_prediction_error(model_name, version, "prediction_error")
+        raise HTTPException(status_code=500, detail=str(e))

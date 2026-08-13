@@ -1,3 +1,4 @@
+
 ```markdown
 # ML Model Serving Platform (MSP)
 
@@ -21,12 +22,12 @@ A production-grade infrastructure for registering, versioning, and serving machi
 * ✅ **Database:** PostgreSQL container configured and connected.
 * ✅ **Model Registry:** PostgreSQL-backed model and version metadata tracking (MSP-002).
 * ✅ **Artifact Storage:** Storage abstraction with Local backend support, URI resolution (`local://`), and path traversal protection (MSP-003).
-* ✅ **Testing:** Unit and integration tests for health, registry, and storage running in Docker.
+* ✅ **Model Loader & Cache:** Abstraction for loading Sklearn/joblib models from bytes with in-memory caching and lifecycle validation (MSP-004).
+* ✅ **Prediction API:** End-to-end real-time inference with auto-loading, feature-count validation, and robust error handling (MSP-005).
+* ✅ **Testing:** Comprehensive unit and integration tests (33+ tests) running in Docker.
 
 **PLANNED FOR FUTURE RELEASES (MLOps Scope):**
-* 🚧 Model Loader (Loading stored artifacts into memory)
 * 🚧 Model Versioning & Experiment Tracking (MLflow, DVC)
-* 🚧 Real-time Inference (`POST /predict`)
 * 🚧 Model Monitoring & Drift Detection
 * 🚧 CI/CD Pipelines (GitHub Actions)
 
@@ -38,12 +39,10 @@ A production-grade infrastructure for registering, versioning, and serving machi
    git clone [https://github.com/yourusername/ml-serving-platform.git](https://github.com/yourusername/ml-serving-platform.git)
    cd ml-serving-platform
 
-
 ```
 
 2. **Set up environment variables:**
    Our Makefile handles the creation of the .venv directory and the installation of all requirements automatically
-
 ```bash
 # Creates .venv, upgrades pip, and installs requirements.txt
 make
@@ -51,34 +50,32 @@ make
 # Activate the virtual environment
 source .venv/bin/activate
 
-
 ```
 
-3. **Set up environment variables:**
 
+3. **Set up environment variables:**
 ```bash
 cp env.example .env
 
 ```
 
-4. **Start the infrastructure:**
 
+4. **Start the infrastructure:**
 ```bash
 docker compose up --build -d
 
-
 ```
 
-5. **Verify health:**
 
+5. **Verify health:**
 ```bash
 uvicorn src.serving.app:app --host 0.0.0.0 --port 8000 --reload
 
 curl http://localhost:8000/health
 http://localhost:8000/docs
 
-
 ```
+
 
 *Expected Response:* `{"status": "ok"}`
 
@@ -91,22 +88,33 @@ Once the application is running, the interactive API documentation is available 
 * `POST /models` - Register a new ML model version.
 * `GET /models/{model_name}` - Retrieve model metadata and active versions.
 
+### Model Management
+
+* `POST /{model_name}/versions/{version}/load` - Load a model artifact into memory explicitly.
+* `GET /{model_name}/versions/{version}/status` - Check if a model is currently loaded in memory cache.
+
 ### Inference
 
-* `POST /predict` - Run real-time inference against the active model.
-
+* `POST /{model_name}/versions/{version}/predict` - Run real-time inference against the active model (auto-loads if not in cache).
 ```json
 {
-  "model_name": "fraud-detector",
-  "version": "v1",
-  "features": {
-    "transaction_amount": 120.50,
-    "location": "NL"
-  }
+  "features": [0.2, 1.5, 10.0, 3.2]
 }
 
+```
+
+
+*Expected Response:*
+```json
+{
+  "model_name": "fraud-model",
+  "version": "1.0.0",
+  "prediction": 1
+}
 
 ```
+
+
 
 ## troubleshooting
 
@@ -117,11 +125,14 @@ docker compose up -d
 
 #build api
 docker compose build --no-cache api
+docker compose build api
 
 #craate build again
 docker compose build
 docker compose up -d
-
+#cleaning cash
+docker builder prune -a -f
+docker system prune -f
 ```
 
 # Testing
@@ -165,10 +176,12 @@ ml-serving-platform/
 │   ├── serving/                    # API domain (replaces your app/api)[cite: 1]
 │   │   ├── api.py                  # API router & endpoints
 │   │   ├── app.py                  # FastAPI application[cite: 1]
+│   │   ├── cache.py                # In-memory model caching
 │   │   ├── config.py               # Environment configuration
 │   │   ├── database.py             # DB Connection & session
 │   │   ├── db_models.py            # SQLAlchemy ORM models
 │   │   ├── dependency.py           # Dependency injection (Storage & DB)
+│   │   ├── loader.py               # Model loader abstraction (Sklearn Joblib)
 │   │   ├── repository.py           # Database operations
 │   │   ├── schemas.py              # Pydantic data validation[cite: 1]
 │   │   ├── service.py              # Business logic
@@ -178,6 +191,8 @@ ml-serving-platform/
 │
 ├── tests/                          # Testing directory[cite: 1]
 │   ├── test_health.py              # Health check tests
+│   ├── test_loader.py              # Model loader and cache tests
+│   ├── test_prediction.py          # End-to-end inference API tests
 │   ├── test_registry.py            # Model registry integration tests
 │   └── test_storage.py             # Storage abstraction unit tests
 │
@@ -185,8 +200,6 @@ ml-serving-platform/
 ├── Makefile                        # CLI orchestrator (make train, make serve)[cite: 1]
 ├── pyproject.toml                  # Centralized config for Ruff, Pytest[cite: 1]
 └── requirements.txt                # Python dependencies[cite: 1]
-
-
 
 ```
 
@@ -205,5 +218,6 @@ Tests are executed inside an isolated container to ensure environment consistenc
 ```bash
 docker compose run --rm api pytest -v
 
-
 ```
+
+

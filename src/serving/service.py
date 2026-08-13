@@ -1,22 +1,32 @@
+import time
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from starlette import status
+
 from src.serving import schemas
 from src.serving.repository import ModelRepository, ModelVersionRepository
 from src.serving.storage import ArtifactNotFoundError
 from src.serving.loader import SklearnJoblibLoader, UnsupportedModelFormat
 from src.serving.cache import model_cache
 from src.serving.dependency import get_artifact_storage
+from src.serving.observability import Observability
+
+# ==========================================
+# Custom Exceptions
+# ==========================================
+class ArchivedModelError(Exception):
+    pass
 
 class InvalidFeatures(Exception):
     pass
+
 class PredictionError(Exception):
     pass
 
 
-class ArchivedModelError(Exception):
-    pass
-
+# ==========================================
+# Services
+# ==========================================
 class ModelService:
     @staticmethod
     def create_model(db: Session, model_data: schemas.ModelCreate):
@@ -42,6 +52,7 @@ class ModelService:
             )
         return model
 
+
 class ModelVersionService:
     @staticmethod
     def create_version(db: Session, model_name: str, version_data: schemas.ModelVersionCreate):
@@ -63,55 +74,49 @@ class ModelVersionService:
 
     @staticmethod
     def load_model_version(db: Session, model_name: str, version: str) -> dict:
-        """
-        Complete management of loading a model from storage to memory (MSP-004)
-        """
-        # 1. Check if the model exists
-        model = ModelService.get_model_by_name(db, model_name)
-
-        # 2. Check if the version exists
-        model_version = ModelVersionRepository.get_version_by_model_and_name(db, model.id, version)
-        if not model_version:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Version '{version}' not found for model '{model_name}'."
-            )
-
-        # 3. Apply lifecycle management rules
-        if model_version.status == "archived":
-            raise ArchivedModelError(f"Cannot load archived model version: {model_name}:{version}")
-
-        # 4. Check cache (has it already been loaded?)
+        # 1. بررسی کش
         if model_cache.contains(model_name, version):
+            Observability.record_cache_hit(model_name, version)
             return {"model_name": model_name, "version": version, "status": "already_loaded"}
 
-        # 5. Validate supported format
-        if model_version.framework != "scikit-learn" or model_version.model_format != "joblib":
-            raise UnsupportedModelFormat(
-                f"Unsupported format: {model_version.framework}/{model_version.model_format}"
-            )
+        Observability.record_cache_miss(model_name, version)
 
-        # 6. Retrieve model file bytes from the Storage Layer
+        # 2. بررسی وجود مدل
+        model = ModelService.get_model_by_name(db, model_name)
+        model_version = ModelVersionRepository.get_version_by_model_and_name(db, model.id, version)
+
+        if not model_version:
+            raise HTTPException(status_code=404, detail="Version not found")
+
+        if model_version.status == "archived":
+            raise ArchivedModelError("Cannot load archived model version")
+
+        if model_version.framework != "scikit-learn" or model_version.model_format != "joblib":
+            raise UnsupportedModelFormat("Unsupported format")
+
+        # 3. لود مدل و ثبت زمان
         storage = get_artifact_storage()
         try:
+            start_time = time.time()
             artifact_bytes = storage.get(model_version.artifact_uri)
+            loader = SklearnJoblibLoader()
+            loaded_model = loader.load(artifact_bytes)
+            load_latency = time.time() - start_time
+
+            Observability.record_model_load(model_name, version, "success", load_latency)
         except ArtifactNotFoundError:
+            Observability.record_model_load(model_name, version, "error")
             raise ArtifactNotFoundError(f"Artifact missing for URI: {model_version.artifact_uri}")
+        except Exception as e:
+            Observability.record_model_load(model_name, version, "error")
+            raise e
 
-        # 7. Load the bytes as a model into Memory
-        loader = SklearnJoblibLoader()
-        loaded_model = loader.load(artifact_bytes)
-
-        # 8. Save in Cache for future requests
+        # 4. ذخیره در کش
         model_cache.set(model_name, version, loaded_model)
-
         return {"model_name": model_name, "version": version, "status": "loaded"}
 
     @staticmethod
     def get_model_status(model_name: str, version: str) -> dict:
-        """
-        Check the load status of a model in the Cache
-        """
         is_loaded = model_cache.contains(model_name, version)
         return {
             "model_name": model_name,
@@ -123,41 +128,30 @@ class ModelVersionService:
 class PredictionService:
     @staticmethod
     def predict(db: Session, model_name: str, version: str, features: list[float]) -> dict:
-        # 1. Is the model in the Cache? If not, load it (Auto-loading)
-        if not model_cache.contains(model_name, version):
-            # The load_model_version method performs all checks (model existence, version, archived status, and finding the file)
-            ModelVersionService.load_model_version(db, model_name, version)
 
-        # 2. Retrieve the model from the Cache
+        # --- اصلاح نهایی: فقط Hit را اینجا ثبت می‌کنیم، Miss درون متد load ثبت می‌شود ---
+        if model_cache.contains(model_name, version):
+            Observability.record_cache_hit(model_name, version)
+        else:
+            ModelVersionService.load_model_version(db, model_name, version)
+        # ------------------------------------------------------------------------------
+
         model = model_cache.get(model_name, version)
         if not model:
-            raise PredictionError("Model is not available in memory after load attempt.")
+            raise PredictionError("Model is not available in memory")
 
-        # 3. Feature Count Validation
-        # Many Scikit-Learn models have the n_features_in_ attribute
-        if hasattr(model, "n_features_in_"):
-            expected_features = model.n_features_in_
-            if len(features) != expected_features:
-                raise InvalidFeatures(
-                    f"Invalid number of features. Expected {expected_features}, got {len(features)}."
-                )
+        if hasattr(model, "n_features_in_") and len(features) != model.n_features_in_:
+            raise InvalidFeatures(f"Expected {model.n_features_in_} features, got {len(features)}.")
 
-        # 4. Execute prediction
         try:
-            # Scikit-Learn expects a 2D array (a list of lists)
+            start_pred_time = time.time()
             prediction_result = model.predict([features])
+            prediction_latency = time.time() - start_pred_time
 
-            # Extract the first result (since we only sent one record)
-            prediction_value = prediction_result[0]
+            val = prediction_result[0].item() if hasattr(prediction_result[0], "item") else prediction_result[0]
 
-            # Convert NumPy values to standard Python types (for JSON serialization)
-            if hasattr(prediction_value, "item"):
-                prediction_value = prediction_value.item()
+            Observability.record_prediction_success(model_name, version, prediction_latency)
+            return {"model_name": model_name, "version": version, "prediction": val}
 
-            return {
-                "model_name": model_name,
-                "version": version,
-                "prediction": prediction_value
-            }
         except Exception as e:
-            raise PredictionError(f"Error during model prediction: {str(e)}")
+            raise PredictionError(f"Prediction failed: {str(e)}")
