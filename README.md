@@ -151,6 +151,9 @@ Tests are executed inside an isolated container to ensure environment consistenc
 ```bash
 docker compose run --rm --shm-size=2gb api pytest -v
 
+docker compose run --rm  api pytest -v
+
+docker compose exec api python -m pytest -v
 ```
 
 ## Project Structure
