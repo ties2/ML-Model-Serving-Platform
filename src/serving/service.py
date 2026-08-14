@@ -1,19 +1,19 @@
 import time
-from sqlalchemy.orm import Session
+
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
 from starlette import status
 
 from src.serving import schemas
-from src.serving.repository import ModelRepository, ModelVersionRepository
-from src.serving.storage import ArtifactNotFoundError
-from src.serving.loader import SklearnJoblibLoader, UnsupportedModelFormat
 from src.serving.cache import model_cache
 from src.serving.dependency import get_artifact_storage
+from src.serving.loader import SklearnJoblibLoader, UnsupportedModelFormat
 from src.serving.observability import Observability
+from src.serving.repository import ModelRepository, ModelVersionRepository
+from src.serving.storage import ArtifactNotFoundError
 
-# ==========================================
+
 # Custom Exceptions
-# ==========================================
 class ArchivedModelError(Exception):
     pass
 
@@ -74,14 +74,14 @@ class ModelVersionService:
 
     @staticmethod
     def load_model_version(db: Session, model_name: str, version: str) -> dict:
-        # 1. بررسی کش
+        # 1. Check the cache
         if model_cache.contains(model_name, version):
             Observability.record_cache_hit(model_name, version)
             return {"model_name": model_name, "version": version, "status": "already_loaded"}
 
         Observability.record_cache_miss(model_name, version)
 
-        # 2. بررسی وجود مدل
+        # 2. Check if the model exists
         model = ModelService.get_model_by_name(db, model_name)
         model_version = ModelVersionRepository.get_version_by_model_and_name(db, model.id, version)
 
@@ -94,7 +94,7 @@ class ModelVersionService:
         if model_version.framework != "scikit-learn" or model_version.model_format != "joblib":
             raise UnsupportedModelFormat("Unsupported format")
 
-        # 3. لود مدل و ثبت زمان
+        # 3. Load the model and record load time
         storage = get_artifact_storage()
         try:
             start_time = time.time()
@@ -111,7 +111,7 @@ class ModelVersionService:
             Observability.record_model_load(model_name, version, "error")
             raise e
 
-        # 4. ذخیره در کش
+        # 4. Store in cache
         model_cache.set(model_name, version, loaded_model)
         return {"model_name": model_name, "version": version, "status": "loaded"}
 
@@ -125,16 +125,69 @@ class ModelVersionService:
         }
 
 
+# ==========================================
+# New: Lifecycle Service (MSP-008)
+# ==========================================
+class LifecycleService:
+    @staticmethod
+    def promote_version(db: Session, model_name: str, version: str):
+        # 1. Get the model (the method itself raises a 404 if it doesn't exist)
+        model = ModelService.get_model_by_name(db, model_name)
+
+        # 2. Get the version and perform validation
+        target_version = ModelVersionRepository.get_version_by_model_and_name(db, model.id, version)
+        if not target_version:
+            Observability.record_promotion(model_name, version, "failed", "version_not_found")
+            raise HTTPException(status_code=404, detail="Version not found")
+
+        if target_version.status == "archived":
+            Observability.record_promotion(model_name, version, "failed", "cannot_promote_archived")
+            raise HTTPException(status_code=400, detail="Cannot promote an archived version")
+
+        # 3. Check artifact integrity and loadability
+        storage = get_artifact_storage()
+        try:
+            artifact_bytes = storage.get(target_version.artifact_uri)
+            loader = SklearnJoblibLoader()
+            _ = loader.load(artifact_bytes) # Just testing if it loads
+        except ArtifactNotFoundError:
+            Observability.record_promotion(model_name, version, "failed", "artifact_missing")
+            raise HTTPException(status_code=400, detail="Artifact does not exist")
+        except Exception as e:
+            Observability.record_promotion(model_name, version, "failed", "model_corrupted")
+            raise HTTPException(status_code=400, detail=f"Model artifact is corrupted: {str(e)}")
+
+        # 4. Perform promotion via safe database transaction
+        try:
+            new_prod, old_prod = ModelVersionRepository.promote_transactionally(db, model.id, target_version)
+
+            # 5. Invalidate the old version cache
+            if old_prod:
+                model_cache.invalidate(model_name, old_prod.version)
+
+            Observability.record_promotion(model_name, version, "success")
+            return new_prod
+        except Exception as e:
+            Observability.record_promotion(model_name, version, "failed", "transaction_failed")
+            raise HTTPException(status_code=500, detail="Promotion transaction failed")
+
+    @staticmethod
+    def get_production(db: Session, model_name: str):
+        model = ModelService.get_model_by_name(db, model_name)
+        prod_version = ModelVersionRepository.get_production_version(db, model.id)
+        if not prod_version:
+            raise HTTPException(status_code=404, detail="No production version found")
+        return prod_version
+
+
 class PredictionService:
     @staticmethod
     def predict(db: Session, model_name: str, version: str, features: list[float]) -> dict:
 
-        # --- اصلاح نهایی: فقط Hit را اینجا ثبت می‌کنیم، Miss درون متد load ثبت می‌شود ---
         if model_cache.contains(model_name, version):
             Observability.record_cache_hit(model_name, version)
         else:
             ModelVersionService.load_model_version(db, model_name, version)
-        # ------------------------------------------------------------------------------
 
         model = model_cache.get(model_name, version)
         if not model:
@@ -155,3 +208,16 @@ class PredictionService:
 
         except Exception as e:
             raise PredictionError(f"Prediction failed: {str(e)}")
+
+    # ==========================================
+    # New: Predict Production (MSP-008)
+    # ==========================================
+    @staticmethod
+    def predict_production(db: Session, model_name: str, features: list[float]) -> dict:
+        """Automatically route prediction to the Production version of the model"""
+        model = ModelService.get_model_by_name(db, model_name)
+        prod_version = ModelVersionRepository.get_production_version(db, model.id)
+        if not prod_version:
+            raise HTTPException(status_code=404, detail="No production version found")
+
+        return PredictionService.predict(db, model_name, prod_version.version, features)

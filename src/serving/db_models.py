@@ -1,9 +1,21 @@
 #script for define tables of database
 
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, UniqueConstraint
+from datetime import UTC, datetime
+
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import relationship
-from datetime import datetime
+
 from src.serving.database import Base
+
 
 class DBModel(Base):
     __tablename__ = 'models'
@@ -23,10 +35,16 @@ class DBModelVersion(Base):
     model_format = Column(String, nullable=False)
     artifact_uri = Column(String, nullable=False)
     status = Column(String, nullable=False, default="staging")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now(UTC))
 
     model = relationship("DBModel", back_populates="versions")
 
     __table_args__ = (
         UniqueConstraint('model_id', 'version', name='_model_version_uc'),
+        Index(
+            'uix_model_production',
+            'model_id',
+            unique=True,
+            postgresql_where=text("status = 'production'")
+        ),
     )

@@ -1,19 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException ,status
-from sqlalchemy.orm import Session
 from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
 from src.serving import schemas
 from src.serving.database import get_db
-from src.serving.service import ModelService, ModelVersionService, ArchivedModelError, InvalidFeatures, PredictionError, PredictionService
-from src.serving.storage import ArtifactNotFoundError
 from src.serving.loader import (
-    UnsupportedModelFormat,
     InvalidModelArtifact,
-    ModelLoadError
+    ModelLoadError,
+    UnsupportedModelFormat,
 )
-
-from src.serving.schemas import PredictionRequest, PredictionResponse
 from src.serving.observability import Observability
-
+from src.serving.schemas import PredictionRequest, PredictionResponse
+from src.serving.service import (
+    ArchivedModelError,
+    InvalidFeatures,
+    LifecycleService,
+    ModelService,
+    ModelVersionService,
+    PredictionError,
+    PredictionService,
+)
+from src.serving.storage import ArtifactNotFoundError
 
 router = APIRouter(prefix="/models", tags=["Model Registry"])
 
@@ -114,4 +122,48 @@ def predict_model(model_name: str, version: str, request: PredictionRequest, db:
 
     except (PredictionError, ModelLoadError) as e:
         Observability.record_prediction_error(model_name, version, "prediction_error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# Lifecycle & Promotion Endpoints (MSP-008)
+@router.post("/{model_name}/versions/{version}/promote")
+def promote_model_version(model_name: str, version: str, db: Session = Depends(get_db)):
+    """
+    Promote a specific version of a model to the Production environment.
+    The previous Production version is automatically archived.
+    """
+    updated_version = LifecycleService.promote_version(db, model_name, version)
+    return {
+        "model_name": model_name,
+        "version": updated_version.version,
+        "status": updated_version.status
+    }
+
+@router.get("/{model_name}/production")
+def get_production_version(model_name: str, db: Session = Depends(get_db)):
+    """
+    Get the version of the model that is currently in the Production status.
+    """
+    prod_version = LifecycleService.get_production(db, model_name)
+    return {
+        "model_name": model_name,
+        "version": prod_version.version,
+        "status": prod_version.status
+    }
+
+@router.post("/{model_name}/predict")
+def predict_production(model_name: str, payload: dict, db: Session = Depends(get_db)):
+    """
+    Perform prediction on the Production version without needing to know the version number.
+    """
+    features = payload.get("features")
+    if not features or not isinstance(features, list):
+        raise HTTPException(status_code=422, detail="Invalid request body. 'features' list is required.")
+
+    try:
+        return PredictionService.predict_production(db, model_name, features)
+    except InvalidFeatures as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except PredictionError as e:
         raise HTTPException(status_code=500, detail=str(e))

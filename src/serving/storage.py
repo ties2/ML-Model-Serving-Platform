@@ -40,7 +40,10 @@ class LocalArtifactStorage:
         if not uri.startswith("local://"):
             raise InvalidURIError(f"Invalid URI scheme for LocalStorage: {uri}")
 
-        relative_path = uri[len("local://"):]
+        # ---> FIX: پاک کردن local:// و تمام اسلش‌های اضافی ابتدای مسیر <---
+        # این کار مانع از این می‌شود که os.path.join مسیر را به عنوان مسیر مطلق (Absolute) بشناسد
+        relative_path = uri[len("local://"):].lstrip("/")
+
         full_path = os.path.abspath(os.path.join(self.base_dir, relative_path))
 
         # Security check: Path Traversal Protection

@@ -1,5 +1,8 @@
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
 from src.serving import db_models, schemas
+
 
 class ModelRepository:
 
@@ -52,3 +55,46 @@ class ModelVersionRepository:
         db.commit()
         db.refresh(db_version)
         return db_version
+
+    # =========================================================
+    # --- New Methods for MSP-008 (Lifecycle & Promotion) ---
+    # =========================================================
+
+    @staticmethod
+    def get_production_version(db: Session, model_id: int):
+        """Find the version that currently has the production status"""
+        return db.query(db_models.DBModelVersion).filter(
+            db_models.DBModelVersion.model_id == model_id,
+            db_models.DBModelVersion.status == "production"
+        ).first()
+
+    @staticmethod
+    def promote_transactionally(db: Session, model_id: int, target_version: db_models.DBModelVersion):
+        """
+        Promote a version transactionally (Atomic).
+        If any error occurs, all changes will be rolled back.
+        """
+        try:
+            # 1. Find the current production version
+            current_prod = db.query(db_models.DBModelVersion).filter(
+                db_models.DBModelVersion.model_id == model_id,
+                db_models.DBModelVersion.status == "production"
+            ).first()
+
+            # 2. Archive the current production version (if it exists)
+            if current_prod:
+                current_prod.status = "archived"
+
+            # 3. Change the target version status to production
+            target_version.status = "production"
+
+            # 4. Commit all changes together in a single transaction
+            db.commit()
+            db.refresh(target_version)
+
+            return target_version, current_prod
+
+        except Exception as e:
+            # 5. In case of any error, rollback the database to its previous state
+            db.rollback()
+            raise e
