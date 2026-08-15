@@ -15,7 +15,6 @@ clf.fit([[0, 0], [1, 1], [2, 2]], [0, 1, 2])
 buf = io.BytesIO()
 joblib.dump(clf, buf)
 
-# استفاده از کلاس استاندار سیستم برای ذخیره فایل
 storage = get_artifact_storage()
 file_name = f"{model_name}_{version}.joblib"
 storage.save(f"local://{file_name}", buf.getvalue())
