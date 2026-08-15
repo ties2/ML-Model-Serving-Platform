@@ -142,6 +142,16 @@ docker compose up -d
 docker builder prune -a -f
 docker system prune -f
 
+#! delete all cache and images of all docjer images
+docker system prune -a --volumes
+
+#check status of metrics for API and Prometheus read data
+http://localhost:8000/metrics
+
+**Is Prometheus reading the data?**
+Open your browser and go to your Prometheus panel: 👉 http://localhost:9090/targets
+
+
 ```
 
 ## Running Tests
